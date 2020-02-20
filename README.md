@@ -6,4 +6,6 @@ This project uses [mongodb spark-connector](https://docs.mongodb.com/spark-conne
 
 For development, it is recommended to use VSCode with `Scala Syntax (official)` and `Scala (Metals)` extensions for intellisense.
 
-Usage: `OsrmAdapterBatch <from mongo collection uri> <to csv path>`
+Usage: `spark-submit --packages org.mongodb.spark:mongo-spark-connector_2.11:2.4.1 --class "OsrmAdapterBatch" mongodb://localhost:27017/database.collection file-path-in-hdfs.csv`
+
+To download the produced file as a single csv to the local machine, use the command `hadoop fs -getmerge file-path-in-hdfs.csv ./local-file-path.csv`
