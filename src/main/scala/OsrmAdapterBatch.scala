@@ -25,7 +25,7 @@ object OsrmAdapterBatch {
         .getString(row.fieldIndex("_id"))
         .split(" ")
       val speed = row.getDouble(row.fieldIndex("value")) / row.getDouble(row.fieldIndex("weight"))
-      (from, to, speed)
+      (from, to, Math.round(speed))
     })
     records.write.format("csv").save(csvpath)
   }
