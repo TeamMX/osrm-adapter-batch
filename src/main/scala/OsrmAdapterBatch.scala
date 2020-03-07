@@ -23,7 +23,7 @@ object OsrmAdapterBatch {
     import spark.implicits._
     
     val realtimeDataframe = MongoSpark.load(spark, ReadConfig(Map("uri" -> realtimeMongoUri)))
-    val realtimeSpeeds = realtimeDataframe.map(row => {
+    val realtimeSpeedsDataset = realtimeDataframe.map(row => {
       val Array(from, to) = row
         .getString(row.fieldIndex("_id"))
         .split(" ")
@@ -33,7 +33,7 @@ object OsrmAdapterBatch {
     
     val batchDataframe = MongoSpark.load(spark, ReadConfig(Map("uri" -> batchMongoUri)))
     val batchBucketBroadcast = spark.sparkContext.broadcast(batchBucket)
-    val batchSpeeds = batchDataframe.map(row => {
+    val batchSpeedsDataset = batchDataframe.map(row => {
       val Array(from, to, bucket) = row
         .getString(row.fieldIndex("_id"))
         .split(" ")
@@ -43,8 +43,8 @@ object OsrmAdapterBatch {
     .filter(record => record.bucket == batchBucketBroadcast.value)
     .map(record => new SegmentSpeed(record.segment, record.speed))
 
-    val allSpeeds = realtimeSpeeds
-      .joinWith(batchSpeeds, realtimeSpeeds.col("_1") === batchSpeeds.col("_1"), "full_outer")
+    val allSpeeds = realtimeSpeedsDataset
+      .joinWith(batchSpeedsDataset, realtimeSpeedsDataset.col("_1") === batchSpeedsDataset.col("_1"), "full_outer")
       .map {
         case (l, r) => {
           // outer join, so we may have nulls
