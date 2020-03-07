@@ -4,13 +4,17 @@ import org.apache.spark.sql.types._
 import com.mongodb.spark.config._
 import com.mongodb.spark.MongoSpark
 
+case class SegmentSpeed(segment: String, speed: Long)
+case class SegmentBucketSpeed(segment: String, bucket: String, speed: Long)
+case class FromToSpeed(from: String, to: String, speed: Long)
+
 object OsrmAdapterBatch {
   def main(args: Array[String]) {
     if (args.length != 4) {
-      System.err.print("Usage: OsrmAdapterBatch <from mongo uri> <from mongo 2 uri> <to csv path> <bucket>")
+      System.err.print("Usage: OsrmAdapterBatch <from realtime mongo uri> <from batch mongo uri> <to csv path> <bucket>")
       System.exit(1)
     }
-    val Array(mongouri, mongouri2, csvpath, bucket) = args
+    val Array(realtimeMongoUri, batchMongoUri, outputCsvPath, batchBucket) = args
 
     val spark = SparkSession
       .builder
@@ -18,38 +22,39 @@ object OsrmAdapterBatch {
       .getOrCreate()
     import spark.implicits._
     
-    val df = MongoSpark.load(spark, ReadConfig(Map("uri" -> mongouri)))
-    val records = df.map(row => {
+    val realtimeDataframe = MongoSpark.load(spark, ReadConfig(Map("uri" -> realtimeMongoUri)))
+    val realtimeSpeeds = realtimeDataframe.map(row => {
       val Array(from, to) = row
         .getString(row.fieldIndex("_id"))
         .split(" ")
       val speed = row.getDouble(row.fieldIndex("value")) / row.getDouble(row.fieldIndex("weight"))
-      (from + " " + to, Math.round(speed))
+      new SegmentSpeed(from + " " + to, Math.round(speed))
     })
     
-    val df2 = MongoSpark.load(spark, ReadConfig(Map("uri" -> mongouri2)))
-    val bucketbroadcast = spark.sparkContext.broadcast(bucket)
-    val records2 = df2.map(row => {
+    val batchDataframe = MongoSpark.load(spark, ReadConfig(Map("uri" -> batchMongoUri)))
+    val batchBucketBroadcast = spark.sparkContext.broadcast(batchBucket)
+    val batchSpeeds = batchDataframe.map(row => {
       val Array(from, to, bucket) = row
         .getString(row.fieldIndex("_id"))
         .split(" ")
       val speed = row.getDouble(row.fieldIndex("speedKph"))
-      (from + " " + to, bucket, Math.round(speed))
+      new SegmentBucketSpeed(from + " " + to, bucket, Math.round(speed))
     })
-    .filter(record => record._2 == bucketbroadcast.value)
-    .map(record => (record._1, record._3))
+    .filter(record => record.bucket == batchBucketBroadcast.value)
+    .map(record => new SegmentSpeed(record.segment, record.speed))
 
-    val records3 = records
-      .joinWith(records2, records.col("_1") === records2.col("_1"), "full_outer")
+    val allSpeeds = realtimeSpeeds
+      .joinWith(batchSpeeds, realtimeSpeeds.col("_1") === batchSpeeds.col("_1"), "full_outer")
       .map {
         case (l, r) => {
+          // outer join, so we may have nulls
           val left = Option(l).getOrElse(r)
           val right = Option(r).getOrElse(l)
-          val Array(from, to) = left._1.split(" ")
-          (from, to, (left._2 + right._2) / 2)
+          val Array(from, to) = left.segment.split(" ")
+          (from, to, (left.speed + right.speed) / 2)
         }
       }
 
-    records.write.format("csv").save(csvpath)
+    allSpeeds.write.format("csv").save(outputCsvPath)
   }
 }
